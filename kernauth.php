@@ -101,6 +101,33 @@ function kernauth_verify(array $grant, string $nonce, string $app = KERN_APP_ID,
   }
 }
 
+function kernauth_failure(string $raw, string $fallback): string {
+  $payload = json_decode($raw, true);
+  $message = is_array($payload) ? ($payload["error"]["message"] ?? null) : null;
+  return is_string($message) && $message !== "" ? $message : $fallback;
+}
+
+function kernauth_heartbeat(string $licenseKey, string $installationId, string $api = KERN_API, string $appId = KERN_APP_ID): void {
+  $nonce = rtrim(strtr(base64_encode(random_bytes(24)), "+/", "-_"), "=");
+  $fingerprint = hash("sha256", "kernauth-device-v1:$installationId");
+  $body = json_encode([
+    "protocol_version" => 1, "public_app_id" => $appId, "client_version" => "1.0.0",
+    "license_key" => $licenseKey, "fingerprint_version" => 1, "device_fingerprint" => $fingerprint,
+    "installation_id" => $installationId, "nonce" => $nonce,
+  ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+  $context = stream_context_create(["http" => [
+    "method" => "POST", "header" => "Content-Type: application/json\r\n", "content" => $body,
+    "timeout" => 10, "ignore_errors" => true,
+  ]]);
+  $raw = file_get_contents("$api/v1/client/heartbeat", false, $context);
+  $status = 0;
+  if (isset($http_response_header[0]) && preg_match("/\\s(\\d{3})\\s/", $http_response_header[0], $match)) $status = (int) $match[1];
+  $text = is_string($raw) ? $raw : "";
+  if ($raw === false || $status < 200 || $status >= 300) throw new RuntimeException(kernauth_failure($text, "heartbeat failed ($status)"));
+  $payload = json_decode($text, true);
+  if (!is_array($payload) || ($payload["ok"] ?? false) !== true) throw new RuntimeException("heartbeat failed");
+}
+
 function kernauth_request(string $mode, string $licenseKey, string $installationId, string $api = KERN_API, string $appId = KERN_APP_ID, string $publicKey = KERN_PUBLIC_KEY): array {
   $nonce = rtrim(strtr(base64_encode(random_bytes(24)), "+/", "-_"), "=");
   $fingerprint = hash("sha256", "kernauth-device-v1:$installationId");
@@ -116,7 +143,7 @@ function kernauth_request(string $mode, string $licenseKey, string $installation
   $raw = file_get_contents("$api/v1/client/$mode", false, $context);
   $status = 0;
   if (isset($http_response_header[0]) && preg_match("/\\s(\\d{3})\\s/", $http_response_header[0], $match)) $status = (int) $match[1];
-  if ($raw === false || $status < 200 || $status >= 300) throw new RuntimeException("$mode failed ($status)");
+  if ($raw === false || $status < 200 || $status >= 300) throw new RuntimeException(kernauth_failure(is_string($raw) ? $raw : "", "$mode failed ($status)"));
   $grant = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
   if (!kernauth_verify($grant, $nonce, $appId, $publicKey)) throw new RuntimeException("Invalid or expired signed entitlement");
   return $grant["entitlement"];
@@ -155,7 +182,9 @@ function kernauth_machine_hwid(): string {
 
 if (PHP_SAPI === "cli" && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
   $app = new KernAuth();
-  if (!$app->validate(kernauth_license_key(), kernauth_installation_id())) {
+  $key = kernauth_license_key();
+  $hwid = kernauth_installation_id();
+  if (!$app->validate($key, $hwid)) {
     fwrite(STDERR, $app->message . "\n");
     exit(1);
   }
@@ -164,4 +193,13 @@ if (PHP_SAPI === "cli" && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
   echo "Features: {$ent['features']}\n";
   echo "License: {$ent['license_id']}\n";
   echo "Check expires: {$ent['expires_at']}\n";
+  while (true) {
+    sleep(60);
+    try {
+      kernauth_heartbeat($key, $hwid, $app->api, $app->appId);
+    } catch (Throwable $error) {
+      fwrite(STDERR, $error->getMessage() . "\n");
+      exit(1);
+    }
+  }
 }

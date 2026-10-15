@@ -24,6 +24,7 @@ final class KernAuth {
   private function call(string $mode, string $licenseKey, string $installationId, string $okMessage): bool {
     try {
       $this->entitlement = kernauth_request($mode, $licenseKey, $installationId, $this->api, $this->appId, $this->keyId, $this->publicKey);
+      $this->entitlement["features"] = kernauth_features($this->entitlement["features"]);
     } catch (Throwable $error) {
       $this->success = false;
       $this->message = $error->getMessage();
@@ -143,7 +144,7 @@ if (PHP_SAPI === "cli" && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
   }
   $ent = $app->entitlement;
   echo "Status: {$ent['status']}\n";
-  echo "Features: ", kernauth_features($ent["features"]), "\n";
+  echo "Features: {$ent['features']}\n";
   echo "License: {$ent['license_id']}\n";
   echo "Check expires: {$ent['expires_at']}\n";
 }

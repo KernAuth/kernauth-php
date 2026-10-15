@@ -2,7 +2,6 @@
 
 const KERN_API = "https://api.kernauth.com";
 const KERN_APP_ID = "__PUBLIC_APP_ID__";
-const KERN_KEY_ID = "__KEY_ID__";
 const KERN_PUBLIC_KEY = "__PUBLIC_KEY__";
 
 final class KernAuth {
@@ -13,7 +12,6 @@ final class KernAuth {
   public function __construct(
     public string $api = KERN_API,
     public string $appId = KERN_APP_ID,
-    public string $keyId = KERN_KEY_ID,
     public string $publicKey = KERN_PUBLIC_KEY,
   ) {}
 
@@ -23,7 +21,7 @@ final class KernAuth {
 
   private function call(string $mode, string $licenseKey, string $installationId, string $okMessage): bool {
     try {
-      $this->entitlement = kernauth_request($mode, $licenseKey, $installationId, $this->api, $this->appId, $this->keyId, $this->publicKey);
+      $this->entitlement = kernauth_request($mode, $licenseKey, $installationId, $this->api, $this->appId, $this->publicKey);
       $this->entitlement["features"] = kernauth_features($this->entitlement["features"]);
     } catch (Throwable $error) {
       $this->success = false;
@@ -54,8 +52,19 @@ function kernauth_sorted(mixed $value): mixed {
   return $value;
 }
 
+function kernauth_as_object(mixed $value): mixed {
+  if (!is_array($value)) return $value;
+  if ($value === [] || !array_is_list($value)) {
+    $object = new stdClass();
+    foreach ($value as $key => $item) $object->$key = kernauth_as_object($item);
+    return $object;
+  }
+  return array_map("kernauth_as_object", $value);
+}
+
 function kernauth_features(mixed $value): string {
   if (is_string($value)) $value = json_decode($value, false, 512, JSON_THROW_ON_ERROR);
+  if (is_array($value)) $value = kernauth_as_object($value);
   return json_encode(kernauth_sorted($value), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 }
 
@@ -75,14 +84,14 @@ function kernauth_b64(?string $value): ?string {
   return $raw === false ? null : $raw;
 }
 
-function kernauth_verify(array $grant, string $nonce, string $app = KERN_APP_ID, string $keyId = KERN_KEY_ID, string $publicKey = KERN_PUBLIC_KEY, ?int $nowMs = null): bool {
+function kernauth_verify(array $grant, string $nonce, string $app = KERN_APP_ID, string $publicKey = KERN_PUBLIC_KEY, ?int $nowMs = null): bool {
   if (!function_exists("sodium_crypto_sign_verify_detached")) return false;
   try {
     $ent = $grant["entitlement"];
     $nowMs ??= (int) round(microtime(true) * 1000);
     $expiryMs = (int) (new DateTimeImmutable($ent["expires_at"]))->format("Uv");
     if ((int) $ent["protocol_version"] !== 1 || $ent["nonce"] !== $nonce || $ent["application_id"] !== $app ||
-        $ent["key_id"] !== $keyId || $ent["status"] !== "active" || $expiryMs <= $nowMs) return false;
+        $ent["status"] !== "active" || $expiryMs <= $nowMs) return false;
     $raw = kernauth_b64($publicKey);
     $signature = kernauth_b64($grant["signature"]);
     if ($raw === null || strlen($raw) !== 32 || $signature === null || strlen($signature) !== 64) return false;
@@ -92,7 +101,7 @@ function kernauth_verify(array $grant, string $nonce, string $app = KERN_APP_ID,
   }
 }
 
-function kernauth_request(string $mode, string $licenseKey, string $installationId, string $api = KERN_API, string $appId = KERN_APP_ID, string $keyId = KERN_KEY_ID, string $publicKey = KERN_PUBLIC_KEY): array {
+function kernauth_request(string $mode, string $licenseKey, string $installationId, string $api = KERN_API, string $appId = KERN_APP_ID, string $publicKey = KERN_PUBLIC_KEY): array {
   $nonce = rtrim(strtr(base64_encode(random_bytes(24)), "+/", "-_"), "=");
   $fingerprint = hash("sha256", "kernauth-device-v1:$installationId");
   $body = json_encode([
@@ -109,7 +118,7 @@ function kernauth_request(string $mode, string $licenseKey, string $installation
   if (isset($http_response_header[0]) && preg_match("/\\s(\\d{3})\\s/", $http_response_header[0], $match)) $status = (int) $match[1];
   if ($raw === false || $status < 200 || $status >= 300) throw new RuntimeException("$mode failed ($status)");
   $grant = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-  if (!kernauth_verify($grant, $nonce, $appId, $keyId, $publicKey)) throw new RuntimeException("Invalid or expired signed entitlement");
+  if (!kernauth_verify($grant, $nonce, $appId, $publicKey)) throw new RuntimeException("Invalid or expired signed entitlement");
   return $grant["entitlement"];
 }
 

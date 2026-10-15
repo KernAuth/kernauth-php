@@ -1,6 +1,6 @@
 # KernAuth PHP example
 
-Paste the public app ID, key ID, and public key from Developers into `kernauth.php`. PHP 8.1 or newer with the sodium extension.
+Paste the public app ID and public key from Developers into `kernauth.php`. PHP 8.1 or newer with the sodium extension.
 
 ## Instance
 
@@ -8,7 +8,6 @@ Paste the public app ID, key ID, and public key from Developers into `kernauth.p
 $app = new KernAuth(
     "https://api.kernauth.com",
     "__PUBLIC_APP_ID__",
-    "__KEY_ID__",
     "__PUBLIC_KEY__",
 );
 ```

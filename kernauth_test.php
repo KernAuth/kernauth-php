@@ -9,19 +9,18 @@ foreach ($fixture["vectors"] as $vector) {
   $grant = ["entitlement" => $ent, "signature" => $vector["signature"]];
   if (kernauth_canonical($ent) !== $vector["canonical"]) fail($vector["name"] . " canonical");
   $expiry = (int) (new DateTimeImmutable($ent["expires_at"]))->format("Uv");
-  $ok = kernauth_verify($grant, $ent["nonce"], $ent["application_id"], $ent["key_id"], $vector["public_key"], $now);
-  $badNonce = kernauth_verify($grant, "wrong", $ent["application_id"], $ent["key_id"], $vector["public_key"], $now);
-  $badApp = kernauth_verify($grant, $ent["nonce"], "pub_other_app", $ent["key_id"], $vector["public_key"], $now);
-  $badKey = kernauth_verify($grant, $ent["nonce"], $ent["application_id"], "wrong-key", $vector["public_key"], $now);
-  $badSig = kernauth_verify(["entitlement" => $ent, "signature" => $vector["signature"] . "AA"], $ent["nonce"], $ent["application_id"], $ent["key_id"], $vector["public_key"], $now);
-  $expired = kernauth_verify($grant, $ent["nonce"], $ent["application_id"], $ent["key_id"], $vector["public_key"], $expiry);
+  $ok = kernauth_verify($grant, $ent["nonce"], $ent["application_id"], $vector["public_key"], $now);
+  $badNonce = kernauth_verify($grant, "wrong", $ent["application_id"], $vector["public_key"], $now);
+  $badApp = kernauth_verify($grant, $ent["nonce"], "pub_other_app", $vector["public_key"], $now);
+  $badSig = kernauth_verify(["entitlement" => $ent, "signature" => $vector["signature"] . "AA"], $ent["nonce"], $ent["application_id"], $vector["public_key"], $now);
+  $expired = kernauth_verify($grant, $ent["nonce"], $ent["application_id"], $vector["public_key"], $expiry);
   $tampered = $ent;
   $tampered["device_id"] = "other";
-  $badDevice = kernauth_verify(["entitlement" => $tampered, "signature" => $vector["signature"]], $ent["nonce"], $ent["application_id"], $ent["key_id"], $vector["public_key"], $now);
+  $badDevice = kernauth_verify(["entitlement" => $tampered, "signature" => $vector["signature"]], $ent["nonce"], $ent["application_id"], $vector["public_key"], $now);
   $revoked = $ent;
   $revoked["status"] = "revoked";
-  $badStatus = kernauth_verify(["entitlement" => $revoked, "signature" => $vector["signature"]], $ent["nonce"], $ent["application_id"], $ent["key_id"], $vector["public_key"], $now);
-  if (!$ok || $badNonce || $badApp || $badKey || $badSig || $expired || $badDevice || $badStatus) fail($vector["name"]);
+  $badStatus = kernauth_verify(["entitlement" => $revoked, "signature" => $vector["signature"]], $ent["nonce"], $ent["application_id"], $vector["public_key"], $now);
+  if (!$ok || $badNonce || $badApp || $badSig || $expired || $badDevice || $badStatus) fail($vector["name"]);
 }
 echo "PHP vectors passed\n";
 

@@ -8,6 +8,7 @@ const KERN_PUBLIC_KEY = "__PUBLIC_KEY__";
 final class KernAuth {
   public bool $success = false;
   public string $message = "";
+  public ?array $entitlement = null;
 
   public function __construct(
     public string $api = KERN_API,
@@ -22,10 +23,11 @@ final class KernAuth {
 
   private function call(string $mode, string $licenseKey, string $installationId, string $okMessage): bool {
     try {
-      kernauth_request($mode, $licenseKey, $installationId, $this->api, $this->appId, $this->keyId, $this->publicKey);
+      $this->entitlement = kernauth_request($mode, $licenseKey, $installationId, $this->api, $this->appId, $this->keyId, $this->publicKey);
     } catch (Throwable $error) {
       $this->success = false;
       $this->message = $error->getMessage();
+      $this->entitlement = null;
       return false;
     }
     $this->success = true;
@@ -89,7 +91,7 @@ function kernauth_verify(array $grant, string $nonce, string $app = KERN_APP_ID,
   }
 }
 
-function kernauth_request(string $mode, string $licenseKey, string $installationId, string $api = KERN_API, string $appId = KERN_APP_ID, string $keyId = KERN_KEY_ID, string $publicKey = KERN_PUBLIC_KEY): void {
+function kernauth_request(string $mode, string $licenseKey, string $installationId, string $api = KERN_API, string $appId = KERN_APP_ID, string $keyId = KERN_KEY_ID, string $publicKey = KERN_PUBLIC_KEY): array {
   $nonce = rtrim(strtr(base64_encode(random_bytes(24)), "+/", "-_"), "=");
   $fingerprint = hash("sha256", "kernauth-device-v1:$installationId");
   $body = json_encode([
@@ -107,19 +109,41 @@ function kernauth_request(string $mode, string $licenseKey, string $installation
   if ($raw === false || $status < 200 || $status >= 300) throw new RuntimeException("$mode failed ($status)");
   $grant = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
   if (!kernauth_verify($grant, $nonce, $appId, $keyId, $publicKey)) throw new RuntimeException("Invalid or expired signed entitlement");
+  return $grant["entitlement"];
+}
+
+function kernauth_license_key(): string {
+  $env = getenv("KERN_LICENSE_KEY");
+  if (is_string($env) && trim($env) !== "") return trim($env);
+  if (stream_isatty(STDIN)) fwrite(STDOUT, "Enter license: ");
+  $line = fgets(STDIN);
+  return $line === false ? "" : trim($line);
+}
+
+function kernauth_installation_id(): string {
+  $env = getenv("KERN_INSTALLATION_ID");
+  if (is_string($env) && trim($env) !== "") return trim($env);
+  if (is_file("kernauth-install")) {
+    $saved = trim((string) file_get_contents("kernauth-install"));
+    if ($saved !== "") return $saved;
+  }
+  $created = bin2hex(random_bytes(16));
+  if (file_put_contents("kernauth-install", $created . "\n") === false) {
+    fwrite(STDERR, "Could not save the installation id\n");
+    exit(1);
+  }
+  return $created;
 }
 
 if (PHP_SAPI === "cli" && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
-  $license = getenv("KERN_LICENSE_KEY");
-  $installation = getenv("KERN_INSTALLATION_ID");
-  if ($license === false || $installation === false || $license === "" || $installation === "") {
-    fwrite(STDERR, "Set KERN_LICENSE_KEY and KERN_INSTALLATION_ID\n");
-    exit(1);
-  }
   $app = new KernAuth();
-  if (!$app->validate($license, $installation)) {
+  if (!$app->validate(kernauth_license_key(), kernauth_installation_id())) {
     fwrite(STDERR, $app->message . "\n");
     exit(1);
   }
-  echo $app->message, "\n";
+  $ent = $app->entitlement;
+  echo "Status: {$ent['status']}\n";
+  echo "Features: ", kernauth_features($ent["features"]), "\n";
+  echo "License: {$ent['license_id']}\n";
+  echo "Check expires: {$ent['expires_at']}\n";
 }

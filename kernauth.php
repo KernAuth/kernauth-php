@@ -124,16 +124,24 @@ function kernauth_license_key(): string {
 function kernauth_installation_id(): string {
   $env = getenv("KERN_INSTALLATION_ID");
   if (is_string($env) && trim($env) !== "") return trim($env);
-  if (is_file("kernauth-install")) {
-    $saved = trim((string) file_get_contents("kernauth-install"));
-    if ($saved !== "") return $saved;
+  $hwid = trim(kernauth_machine_hwid());
+  if (preg_match("/^[A-Za-z0-9_-]{8,64}$/", $hwid) === 1) return $hwid;
+  fwrite(STDERR, "Could not read the HWID\n");
+  exit(1);
+}
+
+function kernauth_machine_hwid(): string {
+  if (PHP_OS_FAMILY === "Windows") {
+    $raw = shell_exec("powershell.exe -NoProfile -Command \"[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value\"");
+    return is_string($raw) ? $raw : "";
   }
-  $created = bin2hex(random_bytes(16));
-  if (file_put_contents("kernauth-install", $created . "\n") === false) {
-    fwrite(STDERR, "Could not save the installation id\n");
-    exit(1);
+  if (PHP_OS_FAMILY === "Darwin") {
+    $raw = shell_exec("ioreg -rd1 -c IOPlatformExpertDevice");
+    if (is_string($raw) && preg_match('/"IOPlatformUUID" = "([^"]+)"/', $raw, $match) === 1) return $match[1];
+    return "";
   }
-  return $created;
+  $raw = @file_get_contents("/etc/machine-id");
+  return is_string($raw) ? $raw : "";
 }
 
 if (PHP_SAPI === "cli" && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
